@@ -7,5 +7,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 
 # Index configuration
-PINECONE_INDEX_NAME = "vietnam-travel-index"
-PINECONE_VECTOR_DIM = 1536  # for text-embedding-3-small
+PINECONE_INDEX_NAME = "vietnam-travel-index-1"
+PINECONE_VECTOR_DIM = 384   # for 'all-MiniLM-L6-v2' model
+# PINECONE_VECTOR_DIM = 1536  # for text-embedding-3-small openai

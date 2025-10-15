@@ -1,8 +1,8 @@
-# pinecone_upload.py
+# pinecone_upload_free.py
 import json
 import time
 from tqdm import tqdm
-from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 from pinecone import Pinecone, ServerlessSpec
 import config
 
@@ -13,12 +13,11 @@ DATA_FILE = "vietnam_travel_dataset.json"
 BATCH_SIZE = 32
 
 INDEX_NAME = config.PINECONE_INDEX_NAME
-VECTOR_DIM = config.PINECONE_VECTOR_DIM  # 1536 for text-embedding-3-small
+VECTOR_DIM = config.PINECONE_VECTOR_DIM 
 
 # -----------------------------
-# Initialize clients
+# Initialize Pinecone client
 # -----------------------------
-client = OpenAI(api_key=config.OPENAI_API_KEY)
 pc = Pinecone(api_key=config.PINECONE_API_KEY)
 
 # -----------------------------
@@ -33,7 +32,7 @@ if INDEX_NAME not in existing_indexes:
         metric="cosine",
         spec=ServerlessSpec(
             cloud="aws",
-            region="us-east-1"  # <-- This is the correct region for the free plan
+            region="us-east-1"  # correct region for free plan
         )
     )
     # Wait for index to be ready
@@ -41,18 +40,30 @@ if INDEX_NAME not in existing_indexes:
         time.sleep(1)
 else:
     print(f"Index {INDEX_NAME} already exists.")
-    
+
 # Connect to the index
 index = pc.Index(INDEX_NAME)
 
 # -----------------------------
-# Helper functions
+# Load free embedding model
 # -----------------------------
-def get_embeddings(texts, model="text-embedding-3-small"):
-    """Generate embeddings using OpenAI v1.0+ API."""
-    resp = client.embeddings.create(model=model, input=texts)
-    return [data.embedding for data in resp.data]
+#  (paid) -> openai 
+# from openai import OpenAI
+# client = OpenAI(api_key=config.OPENAI_API_KEY)
+# def get_embeddings(texts, model="text-embedding-3-small"):
+#     resp = client.embeddings.create(model=model, input=texts)
+#     return [data.embedding for data in resp.data]
 
+#  (free):
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+def get_embeddings(texts):
+    """Generate embeddings using free local model."""
+    return model.encode(texts, show_progress_bar=False, convert_to_numpy=True).tolist()
+
+# -----------------------------
+# Helper
+# -----------------------------
 def chunked(iterable, n):
     for i in range(0, len(iterable), n):
         yield iterable[i:i+n]
@@ -85,7 +96,7 @@ def main():
         texts = [item[1] for item in batch]
         metas = [item[2] for item in batch]
 
-        embeddings = get_embeddings(texts, model="text-embedding-3-small")
+        embeddings = get_embeddings(texts)
 
         vectors = [
             {"id": _id, "values": emb, "metadata": meta}
@@ -95,7 +106,7 @@ def main():
         index.upsert(vectors)
         time.sleep(0.2)
 
-    print("All items uploaded successfully.")
+    print("✅ All items uploaded successfully (using free embeddings).")
 
 # -----------------------------
 if __name__ == "__main__":
