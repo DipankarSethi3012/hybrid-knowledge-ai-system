@@ -2,3 +2,6 @@
 venv/
 .env
 pycache/
+
+# Local test file
+test_connection.py
