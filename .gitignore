@@ -5,3 +5,5 @@ pycache/
 
 # Local test file
 test_connection.py
+logs/app.log
+logs/__pycache__/
