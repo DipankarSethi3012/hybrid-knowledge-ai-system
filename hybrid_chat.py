@@ -1,76 +1,73 @@
-# hybrid_chat.py (Updated: Sentence-Transformers for embeddings)
 import json
 from typing import List
-# from openai import OpenAI  # Commented out since we use Sentence-Transformers for embeddings
 from pinecone import Pinecone, ServerlessSpec
 from neo4j import GraphDatabase
-from sentence_transformers import SentenceTransformer
 from neo4j.exceptions import ServiceUnavailable, AuthError
+from sentence_transformers import SentenceTransformer
+from openai import OpenAI
 import config
 
 # -----------------------------
 # Config
 # -----------------------------
-EMBED_MODEL = "all-MiniLM-L6-v2"  # Sentence-Transformers model
-# CHAT_MODEL = "gpt-4o-mini"
+EMBED_MODEL = "all-MiniLM-L6-v2"  # Free embedding model
+CHAT_MODEL = "gpt-3.5-turbo"      # OpenAI chat model (change to gpt-4o-mini if desired)
 TOP_K = 5
-
 INDEX_NAME = config.PINECONE_INDEX_NAME
 
 # -----------------------------
 # Initialize Clients
 # -----------------------------
-# try:
-#     client = OpenAI(api_key=config.OPENAI_API_KEY)
-#     print("✅ OpenAI client initialized.")
-# except Exception as e:
-#     print("❌ Error initializing OpenAI client:", e)
-#     raise
-
+# Free embedding model
 try:
-    pc = Pinecone(api_key=config.PINECONE_API_KEY)
-    print("✅ Pinecone client initialized.")
+    embed_model = SentenceTransformer(EMBED_MODEL)
+    print(f"Loaded embedding model: {EMBED_MODEL}")
 except Exception as e:
-    print("❌ Error initializing Pinecone client:", e)
+    print("Error loading Sentence-Transformer:", e)
     raise
 
-# Ensure Pinecone index exists
+# Pinecone
+try:
+    pc = Pinecone(api_key=config.PINECONE_API_KEY)
+    print("Pinecone client initialized.")
+except Exception as e:
+    print("Error initializing Pinecone client:", e)
+    raise
+
 if INDEX_NAME not in [i.name for i in pc.list_indexes()]:
-    print(f"🛠 Creating Pinecone index: {INDEX_NAME}")
+    print(f"Creating Pinecone index: {INDEX_NAME}")
     pc.create_index(
         name=INDEX_NAME,
         dimension=config.PINECONE_VECTOR_DIM,
         metric="cosine",
-        spec=ServerlessSpec(cloud="aws", region="us-east1-gcp")
+        spec=ServerlessSpec(cloud="aws", region="us-east-1")
     )
 
 index = pc.Index(INDEX_NAME)
-print(f"✅ Connected to Pinecone index: {INDEX_NAME}")
+print(f"Connected to Pinecone index: {INDEX_NAME}")
 
-# Connect to Neo4j
+# Neo4j
 try:
     driver = GraphDatabase.driver(
         config.NEO4J_URI, auth=(config.NEO4J_USER, config.NEO4J_PASSWORD)
     )
     with driver.session() as s:
         s.run("RETURN 1")
-    print("✅ Connected to Neo4j Aura.")
+    print("Connected to Neo4j Aura.")
 except AuthError:
-    print("❌ Neo4j authentication failed. Check username/password.")
+    print("Neo4j authentication failed. Check username/password.")
     raise
 except ServiceUnavailable:
-    print("❌ Neo4j connection failed. Check your URI or network.")
+    print("Neo4j connection failed. Check your URI or network.")
     raise
 
-# -----------------------------
-# Load Sentence-Transformer
-# -----------------------------
+# OpenAI for chat answers only
 try:
-    embed_model = SentenceTransformer(EMBED_MODEL)
-    print("✅ Sentence-Transformer model loaded.")
+    openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
+    print("OpenAI client initialized.")
 except Exception as e:
-    print("❌ Error loading Sentence-Transformer:", e)
-    raise
+    print("Error initializing OpenAI client:", e)
+    openai_client = None
 
 # -----------------------------
 # Helper Functions
@@ -79,7 +76,6 @@ def embed_text(text: str) -> List[float]:
     """Generate embeddings using sentence-transformers."""
     vec = embed_model.encode(text, normalize_embeddings=True)
     return vec.tolist() if hasattr(vec, "tolist") else list(vec)
-
 
 def pinecone_query(query_text: str, top_k=TOP_K):
     """Query Pinecone for similar items."""
@@ -91,12 +87,11 @@ def pinecone_query(query_text: str, top_k=TOP_K):
             include_metadata=True
         )
         matches = res.matches if hasattr(res, "matches") else res["matches"]
-        print(f"DEBUG: Pinecone returned {len(matches)} matches.")
+        print(f"Pinecone returned {len(matches)} matches.")
         return matches
     except Exception as e:
-        print("❌ Pinecone query failed:", e)
+        print("Pinecone query failed:", e)
         return []
-
 
 def fetch_graph_context(node_ids: List[str], neighborhood_depth=1):
     """Fetch neighboring entities from Neo4j."""
@@ -121,10 +116,9 @@ def fetch_graph_context(node_ids: List[str], neighborhood_depth=1):
                         "labels": r["labels"]
                     })
             except Exception as e:
-                print(f"⚠️ Error fetching graph facts for node {nid}: {e}")
-    print(f"DEBUG: Retrieved {len(facts)} graph facts.")
+                print(f"Error fetching graph facts for node {nid}: {e}")
+    print(f"Retrieved {len(facts)} graph facts.")
     return facts
-
 
 def build_prompt(user_query, pinecone_matches, graph_facts):
     """Combine semantic and graph info into a single prompt."""
@@ -157,34 +151,32 @@ def build_prompt(user_query, pinecone_matches, graph_facts):
          "Based on this, answer the query briefly with itinerary tips or recommendations. Mention node IDs where relevant."}
     ]
 
-
 def call_chat(prompt_messages):
-    """Call OpenAI ChatCompletion API (still optional)."""
-    # Uncomment if you want OpenAI chat
-    # try:
-    #     resp = client.chat.completions.create(
-    #         model=CHAT_MODEL,
-    #         messages=prompt_messages,
-    #         max_tokens=600,
-    #         temperature=0.3
-    #     )
-    #     return resp.choices[0].message.content
-    # except Exception as e:
-    #     print("❌ Chat API error:", e)
-    #     return "Sorry, there was an issue generating the answer."
-    return "💡 Chat answer feature is disabled. Only embeddings and retrieval are active."
-
+    """Call OpenAI ChatCompletion API for answers."""
+    if openai_client is None:
+        return "OpenAI client not initialized."
+    try:
+        resp = openai_client.chat.completions.create(
+            model=CHAT_MODEL,
+            messages=prompt_messages,
+            max_tokens=600,
+            temperature=0.3
+        )
+        return resp.choices[0].message.content
+    except Exception as e:
+        print("Chat API error:", e)
+        return "Sorry, there was an issue generating the answer."
 
 # -----------------------------
 # Interactive CLI
 # -----------------------------
 def interactive_chat():
-    print("\n🤖 Hybrid AI Travel Assistant")
+    print("\nHybrid AI Travel Assistant")
     print("Type 'exit' to quit.\n")
     while True:
-        query = input("🧭 Your question: ").strip()
+        query = input("Your question: ").strip()
         if not query or query.lower() in ("exit", "quit"):
-            print("👋 Exiting. Have a great day!")
+            print("Exiting. Have a great day!")
             break
 
         matches = pinecone_query(query, top_k=TOP_K)
@@ -193,10 +185,9 @@ def interactive_chat():
         prompt = build_prompt(query, matches, graph_facts)
         answer = call_chat(prompt)
 
-        print("\n=== ✈️ Assistant Answer ===\n")
+        print("\n=== Assistant Answer ===\n")
         print(answer)
         print("\n===========================\n")
-
 
 if __name__ == "__main__":
     interactive_chat()
