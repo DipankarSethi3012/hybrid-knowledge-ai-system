@@ -7,5 +7,6 @@ pycache/
 test_connection.py
 logs/app.log
 logs/__pycache__/
-cache/
 __pycache__/*.pyc
+!cache
+cache/queries
